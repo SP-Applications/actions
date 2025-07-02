@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    uses: ./.github/workflows/code-quality.yml
+    with:
+      VERBOSE: true
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  release:
+    needs: prepare
+    uses: ./.github/workflows/semantic-release.yml
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  rebase:
+    needs: release
+    uses: ./.github/workflows/rebase-develop.yml

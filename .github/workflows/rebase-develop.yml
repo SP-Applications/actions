@@ -1,0 +1,31 @@
+name: Rebase Develop
+
+on:
+  workflow_call:
+
+jobs:
+  rebase-develop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Environment
+        uses: SP-Applications/actions/.github/actions/setup-environment@main
+        with:
+          FETCH_DEPTH: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Fetch latest changes
+        run: |
+          git fetch origin main develop
+
+      - name: Rebase develop onto main
+        run: |
+          git checkout develop
+          git rebase origin/main || (git rebase --abort && exit 1)
+
+      - name: Force push develop
+        run: |
+          git push --force-with-lease origin develop
