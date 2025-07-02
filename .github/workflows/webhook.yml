@@ -1,0 +1,39 @@
+name: Webhook
+
+on:
+  workflow_call:
+    secrets:
+      WEBHOOK_URL:
+        required: true
+
+jobs:
+  webhook:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Required Inputs and Secrets
+        run: |
+          if [[-z "${{ secrets.WEBHOOK_URL }}"]]; then
+            echo "Error: WEBHOOK_URL is missing."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Deploy Webhook
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d '{}')
+          status_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response body: $body"
+          echo "Status code: $status_code"
+
+          if [ "$status_code" -ge 200 ] && [ "$status_code" -lt 300 ]; then
+          echo "Webhook deployed successfully"
+          exit 0
+            else
+          echo "Webhook deployment failed"
+          exit 1
+            fi
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}

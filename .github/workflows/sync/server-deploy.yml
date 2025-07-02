@@ -1,0 +1,200 @@
+name: Server Deploy
+
+on:
+  workflow_call:
+    inputs:
+      DOMAIN:
+        type: string
+        required: true
+      FULL_DOMAIN:
+        type: string
+        required: true
+      ENVIRONMENT:
+        type: string
+        required: true
+      CONFIGURATION:
+        type: string
+        required: true
+
+    secrets:
+      USER:
+        required: true
+      HOST:
+        required: true
+      PORT:
+        required: true
+      GROUP:
+        required: true
+      SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  server-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      ROOT: '/home/${{ secrets.USER }}/domains/${{ inputs.DOMAIN }}/public_html'
+      BACKUP: 'backups/${{ inputs.ENVIRONMENT }}/${{ inputs.FULL_DOMAIN }}'
+      DESTINATION: '${{ inputs.ENVIRONMENT }}/${{ inputs.FULL_DOMAIN }}'
+
+    steps:
+      - name: Validate Required Inputs and Secrets
+        run: |
+          if [[ -z "${{ inputs.DOMAIN }}" || -z "${{ inputs.FULL_DOMAIN }}" || -z "${{ inputs.ENVIRONMENT }}" || \
+                -z "${{ secrets.USER }}" || -z "${{ secrets.HOST }}" || -z "${{ secrets.PORT }}" || \
+                -z "${{ secrets.SSH_PRIVATE_KEY }}" ]]; then
+            echo "Error: One or more required inputs or secrets are missing."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Set Up Environment
+        uses: SP-Applications/actions/.github/actions/setup-environment@main
+        with:
+          PRODUCTION: true
+
+      - name: Start SSH Agent
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Verify SSH Connection
+        run: |
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempting SSH connection (try $((RETRY_COUNT + 1)) of $MAX_RETRIES)"
+
+            if SSH_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -p ${{ secrets.PORT }} ${{ secrets.USER }}@${{ secrets.HOST }} "echo 'SSH connection successful'" 2>&1); then
+              EXIT_CODE=0
+            else
+              EXIT_CODE=$?
+            fi
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "SSH connection established successfully!"
+              exit 0
+            elif [ $EXIT_CODE -eq 255 ]; then
+              echo -e "Host key verification failed. \nUpdating known_hosts and retrying..."
+
+              # Remove the old key from known_hosts
+              ssh-keygen -R "[${{ secrets.HOST }}]:${{ secrets.PORT }}" >/dev/null 2>&1
+
+              # Add the new key to known_hosts
+              ssh-keyscan -p ${{ secrets.PORT }} ${{ secrets.HOST }} 2>/dev/null >> ~/.ssh/known_hosts
+            else
+              echo "SSH connection failed with exit code $EXIT_CODE. Retrying..."
+              echo -e "Error details: \n$SSH_OUTPUT"
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 5
+          done
+
+          # If all retries fail, log debug information
+          echo "All attempts failed! Printing debug information..."
+          ssh -vvv -o ConnectTimeout=5 -p ${{ secrets.PORT }} ${{ secrets.USER }}@${{ secrets.HOST }} || true
+
+          # Restart SSH agent and try one last time
+          echo "Restarting SSH agent and retrying one last time..."
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh -o ConnectTimeout=5 -p ${{ secrets.PORT }} -o BatchMode=yes ${{ secrets.USER }}@${{ secrets.HOST }} || exit 1
+        shell: bash
+
+      - name: Process Deployment Config
+        run: |
+          CONFIGURATION="${{ inputs.CONFIGURATION }}"
+
+          # Ensure config file exists
+          if [ ! -f "$CONFIGURATION" ]; then
+            echo "Config file not found: $CONFIGURATION"
+            exit 1
+          fi
+
+          # Extract exclude list and format for rsync
+          EXCLUDE_LIST=$(jq -r '.exclude[] | "--exclude=\(.)"' "$CONFIGURATION" | tr '\n' ' ')
+
+          # Extract filter list and format for rsync
+          FILTER_LIST=$(jq -c '.filter[]' "$CONFIGURATION")
+          FILTER_ARGS=()
+
+          while IFS= read -r line; do
+            RULE=$(echo "$line" | jq -r '.rule')
+            PATH=$(echo "$line" | jq -r '.path')
+            FILTER_ARGS+=("--filter=${RULE} ${PATH}")
+          done <<< "$FILTER_LIST"
+
+          # Export FILTER_ARGS correctly as an array
+          echo "FILTER_ARGS=${FILTER_ARGS[@]}" >> "$GITHUB_ENV"
+
+          # Export values to GitHub Actions environment
+          echo "EXCLUDE_ARGS=$EXCLUDE_LIST" >> "$GITHUB_ENV"
+
+      - name: Prepare Directories
+        run: |
+          ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "mkdir -p $ROOT/$BACKUP && mkdir -p $ROOT/$DESTINATION" \
+          && echo "DOMAIN: ${{ inputs.DOMAIN }}" \
+          && echo "FULL_DOMAIN: ${{ inputs.FULL_DOMAIN }}" \
+          && echo "ENVIRONMENT: ${{ inputs.ENVIRONMENT }}" \
+          && echo "ROOT: $ROOT" \
+          && echo "BACKUP: $ROOT/$BACKUP" \
+          && echo "DESTINATION: $ROOT/$DESTINATION"
+        shell: bash
+
+      - name: Backup Files
+        run: |
+          FILE=$(date +'%Y-%m-%d_%H-%M-%S').tar.gz
+          ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "[ -d $ROOT/$DESTINATION ] && \
+          (tar -czf $ROOT/$BACKUP/$FILE -C $(dirname $ROOT/$DESTINATION) $(basename $ROOT/$DESTINATION) && \
+          echo 'Backup completed: $ROOT/$BACKUP/$FILE') || \
+          echo 'Skipping backup: No files to archive.'"
+
+      - name: Install rsync
+        run: |
+          if ! command -v rsync &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y rsync
+          else
+            echo "rsync is already installed."
+          fi
+        shell: bash
+
+      - name: Sync Files to Server
+        run: |
+          rsync -avz --delete --delete-excluded \
+          -e "ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no" \
+          $EXCLUDE_ARGS "${FILTER_ARGS[@]}" \
+          ./ ${{ secrets.USER }}@${{ secrets.HOST }}:$ROOT/$DESTINATION/
+
+      - name: Fix Permissions After Deployment - Deploy
+        run: |
+          ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "
+          # Set correct ownership
+          chown -R ${{ secrets.USER }}:${{ secrets.GROUP }} $ROOT/$DESTINATION && \
+
+          # Secure default permissions
+          find $ROOT/$DESTINATION -type d -exec chmod 755 {} \; && \
+          find $ROOT/$DESTINATION -type f -exec chmod 644 {} \; && \
+
+          # Allow write access to uploads directory
+          UPLOADS_PATH="$ROOT/$DESTINATION/wp-content/uploads"
+
+          # Ensure directory exists
+          if [ ! -d "$UPLOADS_PATH" ]; then
+            echo "Directory $UPLOADS_PATH does not exist. Creating it now..."
+            mkdir -p "$UPLOADS_PATH"
+          fi
+
+          # Apply correct permissions
+          echo "Applying correct permissions..."
+          find "$UPLOADS_PATH" -type d -exec chmod 775 {} \; && \
+          find "$UPLOADS_PATH" -type f -exec chmod 664 {} \;
+          "
+        shell: bash

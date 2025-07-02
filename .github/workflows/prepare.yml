@@ -1,0 +1,21 @@
+name: Prepare
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    uses: ./.github/workflows/code-quality.yml
+    with:
+      VERBOSE: true
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}

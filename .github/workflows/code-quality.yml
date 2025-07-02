@@ -1,0 +1,43 @@
+name: Code Quality
+
+on:
+  workflow_call:
+    inputs:
+      VERBOSE:
+        type: boolean
+        default: false
+        required: false
+    secrets:
+      GH_TOKEN:
+        required: false
+        description: 'GitHub token for authentication'
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: [8.1, 8.2]
+        node: [20, 21]
+
+    steps:
+      - name: Set Up Composer Authentication
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        if: env.GH_TOKEN != ''
+        run: composer config --global --auth github-oauth.github.com $GH_TOKEN
+        shell: bash
+
+      - name: Setup Environment
+        uses: SP-Applications/actions/.github/actions/setup-environment@main
+        with:
+          FETCH_DEPTH: 0
+          SETUP_PHP: true
+          SETUP_NODE: true
+          INSTALL_DEPENDENCIES: true
+          INSTALL_DEV_DEPENDENCIES: true
+          PHP_VERSION: ${{ matrix.php }}
+          NODE_VERSION: ${{ matrix.node }}
+
+      - name: Run LintRC
+        run: npx @sp-packages/lintrc ${{ inputs.VERBOSE && '--verbose' || '' }}

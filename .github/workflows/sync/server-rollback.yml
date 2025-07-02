@@ -1,0 +1,146 @@
+name: Server Rollback
+
+on:
+  workflow_call:
+    inputs:
+      DOMAIN:
+        type: string
+        required: true
+      FULL_DOMAIN:
+        type: string
+        required: true
+      ENVIRONMENT:
+        type: string
+        required: true
+
+    secrets:
+      USER:
+        required: true
+      HOST:
+        required: true
+      PORT:
+        required: true
+      GROUP:
+        required: true
+      SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  server-rollback:
+    runs-on: ubuntu-latest
+
+    env:
+      ROOT: '/home/${{ secrets.USER }}/domains/${{ inputs.DOMAIN }}/public_html'
+      BACKUP: 'backups/${{ inputs.ENVIRONMENT }}/${{ inputs.FULL_DOMAIN }}'
+      DESTINATION: '${{ inputs.ENVIRONMENT }}/${{ inputs.FULL_DOMAIN }}'
+
+    steps:
+      - name: Validate Required Inputs and Secrets
+        run: |
+          if [[ -z "${{ inputs.DOMAIN }}" || -z "${{ inputs.FULL_DOMAIN }}" || -z "${{ inputs.ENVIRONMENT }}" || \
+                -z "${{ secrets.USER }}" || -z "${{ secrets.HOST }}" || -z "${{ secrets.PORT }}" || \
+                -z "${{ secrets.SSH_PRIVATE_KEY }}" ]]; then
+            echo "Error: One or more required inputs or secrets are missing."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Start SSH Agent
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Verify SSH Connection
+        run: |
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempting SSH connection (try $((RETRY_COUNT + 1)) of $MAX_RETRIES)"
+
+            if SSH_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -p ${{ secrets.PORT }} ${{ secrets.USER }}@${{ secrets.HOST }} "echo 'SSH connection successful'" 2>&1); then
+              EXIT_CODE=0
+            else
+              EXIT_CODE=$?
+            fi
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "SSH connection established successfully!"
+              exit 0
+            elif [ $EXIT_CODE -eq 255 ]; then
+              echo -e "Host key verification failed. \nUpdating known_hosts and retrying..."
+
+              # Remove the old key from known_hosts
+              ssh-keygen -R "[${{ secrets.HOST }}]:${{ secrets.PORT }}" >/dev/null 2>&1
+
+              # Add the new key to known_hosts
+              ssh-keyscan -p ${{ secrets.PORT }} ${{ secrets.HOST }} 2>/dev/null >> ~/.ssh/known_hosts
+            else
+              echo "SSH connection failed with exit code $EXIT_CODE. Retrying..."
+              echo -e "Error details: \n$SSH_OUTPUT"
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 5
+          done
+
+          # If all retries fail, log debug information
+          echo "All attempts failed! Printing debug information..."
+          ssh -vvv -o ConnectTimeout=5 -p ${{ secrets.PORT }} ${{ secrets.USER }}@${{ secrets.HOST }} || true
+
+          # Restart SSH agent and try one last time
+          echo "Restarting SSH agent and retrying one last time..."
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh -o ConnectTimeout=5 -p ${{ secrets.PORT }} -o BatchMode=yes ${{ secrets.USER }}@${{ secrets.HOST }} || exit 1
+        shell: bash
+
+      - name: Find Latest Backup
+        run: |
+          LATEST_BACKUP=$(ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "ls -t $ROOT/$BACKUP/*.tar.gz | head -n 1")
+
+          if [[ -z "$LATEST_BACKUP" ]]; then
+            echo "No backup file found. Rollback aborted."
+            exit 1
+          fi
+
+          echo "Found latest backup: $LATEST_BACKUP"
+          echo "LATEST_BACKUP=$LATEST_BACKUP" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Restore Backup
+        run: |
+          ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "tar -xzf $LATEST_BACKUP -C $(dirname $ROOT/$DESTINATION) && echo 'Rollback complete.'"
+        shell: bash
+
+      - name: Fix Permissions After Deployment - Rollback
+        run: |
+          ssh -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no \
+          ${{ secrets.USER }}@${{ secrets.HOST }} \
+          "
+          # Set correct ownership
+          chown -R ${{ secrets.USER }}:${{ secrets.GROUP }} $ROOT/$DESTINATION && \
+
+          # Secure default permissions
+          find $ROOT/$DESTINATION -type d -exec chmod 755 {} \; && \
+          find $ROOT/$DESTINATION -type f -exec chmod 644 {} \; && \
+
+          # Allow write access to uploads directory
+          UPLOADS_PATH="$ROOT/$DESTINATION/wp-content/uploads"
+
+          # Ensure directory exists
+          if [ ! -d "$UPLOADS_PATH" ]; then
+            echo "Directory $UPLOADS_PATH does not exist. Creating it now..."
+            mkdir -p "$UPLOADS_PATH"
+          fi
+
+          # Apply correct permissions
+          echo "Applying correct permissions..."
+          find "$UPLOADS_PATH" -type d -exec chmod 775 {} \; && \
+          find "$UPLOADS_PATH" -type f -exec chmod 664 {} \;
+          "
+        shell: bash

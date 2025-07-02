@@ -1,0 +1,107 @@
+name: Setup Environment
+
+inputs:
+  FETCH_DEPTH:
+    required: false
+    type: number
+    default: 1
+    description: 'Git fetch depth (0 for all history)'
+  SETUP_PHP:
+    required: false
+    type: boolean
+    default: false
+    description: 'Set to true to include PHP setup'
+  PHP_VERSION:
+    required: false
+    type: string
+    default: '8.1'
+    description: 'PHP version to install'
+  SETUP_NODE:
+    required: false
+    type: boolean
+    default: false
+    description: 'Set to true to include Node.js setup'
+  NODE_VERSION:
+    required: false
+    type: string
+    default: '21'
+    description: 'Node.js version to install'
+  CACHE_KEY_PREFIX:
+    required: false
+    type: string
+    default: 'deps'
+    description: 'Prefix for the cache key'
+  INSTALL_DEPENDENCIES:
+    required: false
+    type: boolean
+    default: false
+    description: 'Set to true to include dependency installation'
+  INSTALL_DEV_DEPENDENCIES:
+    required: false
+    type: boolean
+    default: false
+    description: 'Set to true to include dev dependencies'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ inputs.FETCH_DEPTH }}
+
+    - name: Set Up PHP
+      if: ${{ inputs.SETUP_PHP == 'true' }}
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ inputs.PHP_VERSION }}
+        tools: composer
+
+    - name: Set Up Node.js
+      if: ${{ inputs.SETUP_NODE == 'true' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    - name: Get Composer Cache Directory
+      if: ${{ inputs.SETUP_PHP == 'true' }}
+      id: composer-cache
+      run: echo "dir=$(composer config cache-dir)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Cache Dependencies
+      uses: actions/cache@v4
+      if: ${{ inputs.SETUP_PHP == 'true' || inputs.SETUP_NODE == 'true' }}
+      with:
+        path: |
+          ${{ inputs.SETUP_PHP == 'true' && steps.composer-cache.outputs.dir && steps.composer-cache.outputs.dir || '' }}
+          ${{ inputs.SETUP_NODE == 'true' && '~/.npm' || '' }}
+        key: ${{ inputs.CACHE_KEY_PREFIX }}-${{ runner.os }}-php${{ inputs.PHP_VERSION }}-node${{ inputs.NODE_VERSION }}-dev${{ inputs.INSTALL_DEV_DEPENDENCIES }}-${{ hashFiles('**/composer.lock', '**/package-lock.json') }}
+        restore-keys: |
+          ${{ inputs.CACHE_KEY_PREFIX }}-${{ runner.os }}-php${{ inputs.PHP_VERSION }}-node${{ inputs.NODE_VERSION }}-dev${{ inputs.INSTALL_DEV_DEPENDENCIES }}-
+          ${{ inputs.CACHE_KEY_PREFIX }}-${{ runner.os }}-php${{ inputs.PHP_VERSION }}-node${{ inputs.NODE_VERSION }}-
+          ${{ inputs.CACHE_KEY_PREFIX }}-${{ runner.os }}-php${{ inputs.PHP_VERSION }}-
+          ${{ inputs.CACHE_KEY_PREFIX }}-${{ runner.os }}-
+
+    - name: Install PHP Dependencies
+      if: ${{ inputs.SETUP_PHP == 'true' && inputs.INSTALL_DEPENDENCIES == 'true' }}
+      run: |
+        if [[ "${{ inputs.INSTALL_DEV_DEPENDENCIES }}" == 'true' ]]; then
+          composer install --no-interaction --no-scripts
+        else
+          composer install --no-interaction --no-scripts --no-dev --prefer-dist --optimize-autoloader
+        fi
+      shell: bash
+
+    - name: Install Node.js Dependencies
+      if: ${{ inputs.SETUP_NODE == 'true' && inputs.INSTALL_DEPENDENCIES == 'true' }}
+      run: |
+        if [[ "${{ inputs.INSTALL_DEV_DEPENDENCIES }}" == 'true' ]]; then
+          npm ci
+        else
+          export NODE_ENV=production
+          npm ci --omit=dev
+        fi
+      shell: bash
