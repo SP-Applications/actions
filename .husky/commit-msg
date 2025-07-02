@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Run commitlint
+npx --no -- commitlint --edit "$1"

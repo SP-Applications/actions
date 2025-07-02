@@ -1,0 +1,77 @@
+{
+  "name": "@sp-applications/actions",
+  "description": "This repository provides a collection of reusable workflows for GitHub Actions",
+  "version": "1.0.1",
+  "type": "module",
+  "author": {
+    "name": "Senthilprabu Ponnusamy",
+    "email": "info@senthilprabu.in",
+    "url": "https://www.senthilprabu.in"
+  },
+  "funding": "https://github.com/sponsors/iamsenthilprabu",
+  "keywords": [
+    "github",
+    "actions"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SP-Applications/actions.git"
+  },
+  "depcheck": {
+    "ignores": [
+      "conventional-changelog-conventionalcommits",
+      "cspell",
+      "depcheck",
+      "husky",
+      "markdownlint-cli",
+      "semantic-release",
+      "@commitlint/cli",
+      "@commitlint/config-conventional",
+      "@semantic-release/changelog",
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/exec",
+      "@semantic-release/git",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/github",
+      "@sp-packages/cspell-dictionary",
+      "@sp-packages/depkit",
+      "@sp-packages/lintrc"
+    ]
+  },
+  "lint-staged": {
+    "*": [
+      "npx lintrc"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "@eslint/js": "^9.23.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.1",
+    "@semantic-release/release-notes-generator": "^14.0.3",
+    "@sp-packages/cspell-dictionary": "^1.0.0",
+    "@sp-packages/depkit": "^2.0.0",
+    "@sp-packages/lintrc": "^1.0.0",
+    "conventional-changelog-conventionalcommits": "^9.0.0",
+    "cspell": "^9.0.1",
+    "depcheck": "^1.4.7",
+    "eslint": "^9.23.0",
+    "eslint-config-prettier": "^10.1.1",
+    "eslint-plugin-jsdoc": "^51.0.0",
+    "eslint-plugin-prettier": "^5.2.3",
+    "globals": "^16.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.0.0",
+    "markdownlint-cli": "^0.45.0",
+    "prettier": "^3.5.3",
+    "semantic-release": "^24.2.3"
+  },
+  "scripts": {
+    "build": "echo 'no build step' && exit 0",
+    "prepare": "husky"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "useGitignore": true,
+  "dictionaries": ["php", "npm", "en-gb"],
+  "import": [
+    "./node_modules/@sp-packages/cspell-dictionary/src/cspell-ext.json"
+  ]
+}

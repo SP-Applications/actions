@@ -1,0 +1,5 @@
+# Ignore Composer vendor directory
+/vendor/
+
+# Ignore Node modules directory
+/node_modules/
