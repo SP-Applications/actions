@@ -1,7 +1,7 @@
 {
   "name": "@sp-applications/actions",
   "description": "This repository provides a collection of reusable workflows for GitHub Actions",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "type": "module",
   "author": {
     "name": "Senthilprabu Ponnusamy",
