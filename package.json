@@ -56,7 +56,7 @@
     "@sp-packages/cspell-dictionary": "^1.0.0",
     "@sp-packages/depkit": "^2.0.0",
     "@sp-packages/lintrc": "^1.0.0",
-    "conventional-changelog-conventionalcommits": "^9.0.0",
+    "conventional-changelog-conventionalcommits": "^9.1.0",
     "cspell": "^9.0.1",
     "depcheck": "^1.4.7",
     "eslint": "^9.23.0",
